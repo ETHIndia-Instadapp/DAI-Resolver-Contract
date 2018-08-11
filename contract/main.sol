@@ -14,8 +14,7 @@ pragma solidity ^0.4.24;
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 interface token {
-    // function transfer(address receiver, uint amount) external returns(bool);
-    // function balanceOf(address who) external returns(uint256);
+    function transfer(address receiver, uint amount) external returns(bool);
     function approve(address spender, uint256 value) external returns (bool);
 }
 
@@ -31,13 +30,24 @@ interface MakerCDP {
     function bite(bytes32 cup) external;
 }
 
+interface PriceInterface {
+    function peek() public view returns (bytes32, bool);
+}
+
 interface WETHFace {
     function deposit() external payable;
 }
 
-contract CentralCDP {
+contract InternalCDP {
 
-    address public admin;
+    address public WETH = 0xd0a1e359811322d97991e03f863a0c30c2cf029c;
+    address public PETH = 0xf4d791139ce033ad35db2b2201435fad668b1b64;
+    address public MKR = 0xaaf64bfcc32d0f15873a02163e7e500671a4ffcd;
+    address public DAI = 0xc4375b7de8af5a38a93548eb8453a498222c4ff2;
+
+    address public onChainPrice = 0xA944bd4b25C9F186A846fd5668941AA3d3B8425F;
+
+    address public Admin;
     address public CDPAddr = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
     MakerCDP DAILoanMaster = MakerCDP(CDPAddr);
 
@@ -54,77 +64,99 @@ contract CentralCDP {
     mapping (address => Loan) public Loans; // borrower >>> loan
 
     constructor() public {
-        admin = msg.sender;
-    }
-
-    bytes32 public CDPByteCode;
-    function setCDPBytes(bytes32 bCode) public onlyAdmin { // with 0x as prefice
-        CDPByteCode = bCode;
+        Admin = msg.sender;
+        ApproveERC20();
+        openCDP();
     }
 
     modifier onlyAdmin() {
-        require(msg.sender == admin, "Permission Denied");
+        require(msg.sender == Admin, "Permission Denied");
         _;
     }
 
-    function openCDP() public {
-        DAILoanMaster.open();
-    }
-
-    // Send Ether to contract address to lock ether
-    function() public payable {
-        ETH_WETH(msg.value);
-        WETH_PETH(msg.value);
-        PETH_CDP(msg.value);
-        GlobalLocked += msg.value;
-        Loan storage l = Loans[msg.sender];
-        l.Collateral += msg.value;
+    bytes32 public CDPByteCode;
+    function openCDP() internal {
+        CDPByteCode = DAILoanMaster.open();
     }
 
     // ETH to WETH
-    function ETH_WETH(uint weiAmt) public onlyAdmin {
-        WETHFace wethFunction = WETHFace(0xd0A1E359811322d97991E03f863a0C30C2cF029C);
+    function ETH_WETH(uint weiAmt) internal {
+        WETHFace wethFunction = WETHFace(WETH);
         wethFunction.deposit.value(weiAmt)();
     }
 
     // WETH to PETH
     // WETH to PETH conversion will not be always same = give more WETH and get less PETH
-    function WETH_PETH(uint weiAmt) public onlyAdmin {
+    function WETH_PETH(uint weiAmt) internal {
         // factor the conversion rate between PETH & WETH
         DAILoanMaster.join(weiAmt);
     }
 
     // Lock PETH in CDP Contract
-    function PETH_CDP(uint weiAmt) public onlyAdmin {
+    function PETH_CDP(uint weiAmt) internal {
         DAILoanMaster.lock(CDPByteCode, weiAmt);
     }
 
-    // Withdraw DAI from CDP
-    function CDP_DAI(uint daiAmt) public onlyAdmin {
-        // factor the global balance of ETH & DAI before executing
-        DAILoanMaster.draw(CDPByteCode, daiAmt);
+    // getting ether price from where MakerDAO take price feeds
+    function getETHprice() public view returns (uint ethprice) {
+        PriceInterface ethPrice = PriceInterface(onChainPrice); // https://conteract.io/c/6Cd6544A04
+        bytes32 priceByte;
+        (priceByte, ) = ethPrice.peek();
+        uint priceNum = uint(priceByte);
+        return priceNum;
     }
 
-    // allowing WETH, PETH, MKR, DAI
-    // WETH - 0xd0a1e359811322d97991e03f863a0c30c2cf029c
-    // PETH - 0xf4d791139ce033ad35db2b2201435fad668b1b64
-    // MKR - 0xaaf64bfcc32d0f15873a02163e7e500671a4ffcd
-    // DAI - 0xc4375b7de8af5a38a93548eb8453a498222c4ff2
-    function ApproveERC20(address tokenAddress) public {
-        token tokenFunctions = token(tokenAddress);
-        tokenFunctions.approve(CDPAddr, 2**256 - 1);
+    // allowing WETH, PETH, MKR, DAI // called in the constructor
+    function ApproveERC20() internal {
+        token WETHtkn = token(WETH);
+        WETHtkn.approve(CDPAddr, 2**256 - 1);
+        token PETHtkn = token(PETH);
+        PETHtkn.approve(CDPAddr, 2**256 - 1);
+        token MKRtkn = token(MKR);
+        MKRtkn.approve(CDPAddr, 2**256 - 1);
+        token DAItkn = token(DAI);
+        DAItkn.approve(CDPAddr, 2**256 - 1);
     }
-
-    function DepositEther() public payable {}
 
 }
 
-// for Sean
-// How to get the PETH / WETH ratio?
+contract CentralCDP is InternalCDP {
+
+    // Send Ether to contract address to lock ether
+    function InitiateLoan() public payable {
+        // interchanging required tokens
+        ETH_WETH(msg.value);
+        WETH_PETH(msg.value);
+        PETH_CDP(msg.value);
+        // storing local variables
+        GlobalLocked += msg.value;
+        Loan storage l = Loans[msg.sender];
+        l.Collateral += msg.value;
+    }
+
+    // Withdraw DAI from CDP
+    function InitiateWithdraw(uint daiAmt) public {
+        uint getPrice = getETHprice();
+        require(daiAmt < getPrice/2, "You can't withdraw more than 50% dollar price of ether.");
+        // draw DAI
+        DAILoanMaster.draw(CDPByteCode, daiAmt);
+        // transfer DAI
+        token tokenFunctions = token(DAI);
+        tokenFunctions.transfer(msg.sender, daiAmt);
+        // saving in contract state
+        GlobalWithdraw += daiAmt;
+        Loan storage l = Loans[msg.sender];
+        l.Withdrawn += daiAmt;
+        l.EtherPrice = getPrice;
+    }
+
+}
 
 //// to do later
-// add events
+// add events (contract)
+// keep 1 WETH already locked in your contract to overcome that WETH to PETH problem
 
 //// Improvements
 // instead of open CDP create CDP from individual address and give CDP
 // add a give CDP option to transfer the CDP to another address
+// tub.per in tub contract
