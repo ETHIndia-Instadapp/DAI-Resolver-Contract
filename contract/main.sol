@@ -123,30 +123,39 @@ contract InternalCDP {
 contract CentralCDP is InternalCDP {
 
     // Send Ether to contract address to lock ether
-    function InitiateLoan() public payable {
+    function InitiateLoan(uint daiAmt) public payable {
         // interchanging required tokens
         ETH_WETH(msg.value);
         WETH_PETH(msg.value);
         PETH_CDP(msg.value);
+
         // storing local variables
         GlobalLocked += msg.value;
         Loan storage l = Loans[msg.sender];
         l.Collateral += msg.value;
+
+        InitiateWithdraw(daiAmt);
     }
 
     // Withdraw DAI from CDP
     function InitiateWithdraw(uint daiAmt) public {
+
+        Loan storage l = Loans[msg.sender];
+        uint lockedETH = l.Collateral;
         uint getPrice = getETHprice();
-        require(daiAmt < getPrice/2, "You can't withdraw more than 50% dollar price of ether.");
+        uint halflockedETHinUSD = lockedETH * getPrice / 2;
+        uint availableDAI = l.Withdrawn + daiAmt;
+        require(availableDAI < halflockedETHinUSD, "You can't withdraw more than 50% dollar price of ether.");
+
         // draw DAI
         DAILoanMaster.draw(CDPByteCode, daiAmt);
         // transfer DAI
         token tokenFunctions = token(DAI);
         tokenFunctions.transfer(msg.sender, daiAmt);
+
         // saving in contract state
         // CHECK if already taken loan before or not
         GlobalWithdraw += daiAmt;
-        Loan storage l = Loans[msg.sender];
         l.Withdrawn += daiAmt;
         l.EtherPrice = getPrice;
     }
