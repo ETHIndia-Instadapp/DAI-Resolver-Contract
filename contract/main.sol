@@ -144,6 +144,7 @@ contract CentralCDP is InternalCDP {
         token tokenFunctions = token(DAI);
         tokenFunctions.transfer(msg.sender, daiAmt);
         // saving in contract state
+        // CHECK if already taken loan before or not
         GlobalWithdraw += daiAmt;
         Loan storage l = Loans[msg.sender];
         l.Withdrawn += daiAmt;
