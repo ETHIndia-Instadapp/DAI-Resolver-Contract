@@ -20,23 +20,57 @@ interface token {
 }
 
 interface CDPoperation {
-    function open() public returns (bytes32 cup);
-    function give(bytes32 cup, address guy) public;
-    function lock(bytes32 cup, uint wad) public;
-    function free(bytes32 cup, uint wad) public;
-    function draw(bytes32 cup, uint wad) public;
-    function wipe(bytes32 cup, uint wad) public;
-    function shut(bytes32 cup) public;
-    function bite(bytes32 cup) public;
+    function open() external returns (bytes32 cup);
+    function join(uint wad) external; // Join PETH
+    function give(bytes32 cup, address guy) external;
+    function lock(bytes32 cup, uint wad) external;
+    function free(bytes32 cup, uint wad) external;
+    function draw(bytes32 cup, uint wad) external;
+    function wipe(bytes32 cup, uint wad) external;
+    function shut(bytes32 cup) external;
+    function bite(bytes32 cup) external;
 }
 
 contract ContractCDP {
 
+    address public admin;
     address public CDPAddr = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
     CDPoperation DAILoanMaster = CDPoperation(0xa71937147b55Deb8a530C7229C442Fd3F31b7db2);
-    
+
+    struct Loan {
+        address Borrower; // customer
+        uint Collateral; // locked ETH
+        uint Withdrawn; // withdrawn DAI
+    }
+
+    mapping (address => Loan) public Loans;
+    uint public TotalLocked; // ETH
+
+    constructor(bytes32 bCode) public {
+        admin = msg.sender;
+    }
+
+    bytes32 public CDPByteCode;
+    function setCDPBytes(bytes32 bCode) public onlyAdmin { // with 0x as prefice
+        CDPByteCode = bCode;
+    }
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Permission Denied");
+        _;
+    }
+
     function openCDP() public {
         DAILoanMaster.open();
+    }
+
+    // send ether to contract address to lock ether
+    function() public payable {
+        Loan memory l = Loans[msg.sender];
+        0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(msg.value); // ETH to WETH
+        DAILoanMaster.join(msg.value); // WETH to PETH
+        DAILoanMaster.lock(CDPByteCode, msg.value); // Lock PETH in CDP Contract
+        l.Collateral += msg.value;
     }
 
     // allowing WETH, PETH, MKR, DAI
@@ -50,3 +84,7 @@ contract ContractCDP {
     }
 
 }
+
+//// Improvements
+// instead of open CDP create CDP from individual address and give CDP
+// add a give CDP option to transfer the CDP to another address
