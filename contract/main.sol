@@ -19,7 +19,7 @@ interface token {
     function approve(address spender, uint256 value) external returns (bool);
 }
 
-interface CDPoperation {
+interface MakerCDP {
     function open() external returns (bytes32 cup);
     function join(uint wad) external; // Join PETH
     function give(bytes32 cup, address guy) external;
@@ -31,22 +31,21 @@ interface CDPoperation {
     function bite(bytes32 cup) external;
 }
 
-contract ContractCDP {
+contract CentralCDP {
 
     address public admin;
     address public CDPAddr = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
-    CDPoperation DAILoanMaster = CDPoperation(0xa71937147b55Deb8a530C7229C442Fd3F31b7db2);
+    MakerCDP DAILoanMaster = MakerCDP(CDPAddr);
 
     struct Loan {
-        address Borrower; // customer
         uint Collateral; // locked ETH
         uint Withdrawn; // withdrawn DAI
     }
 
-    mapping (address => Loan) public Loans;
+    mapping (address => Loan) public Loans; // borrower >>> loan
     uint public TotalLocked; // ETH
 
-    constructor(bytes32 bCode) public {
+    constructor() public {
         admin = msg.sender;
     }
 
@@ -66,18 +65,30 @@ contract ContractCDP {
 
     // send ether to contract address to lock ether
     function() public payable {
-        Loan memory l = Loans[msg.sender];
-        0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(msg.value); // ETH to WETH
-        DAILoanMaster.join(msg.value); // WETH to PETH
-        DAILoanMaster.lock(CDPByteCode, msg.value); // Lock PETH in CDP Contract
+        // 0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(msg.value); // ETH to WETH
+        // DAILoanMaster.join(msg.value); // WETH to PETH
+        // DAILoanMaster.lock(CDPByteCode, msg.value); // Lock PETH in CDP Contract
+        Loan storage l = Loans[msg.sender];
         l.Collateral += msg.value;
     }
 
+    function ETH_WETH(uint weiAmt) public onlyAdmin {
+        0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(weiAmt); // ETH to WETH
+    }
+
+    function WETH_PETH(uint weiAmt) public onlyAdmin {
+        DAILoanMaster.join(weiAmt); // WETH to PETH
+    }
+
+    function PETH_CDP(uint weiAmt) public onlyAdmin {
+        DAILoanMaster.lock(CDPByteCode, weiAmt); // Lock PETH in CDP Contract
+    }
+
     // allowing WETH, PETH, MKR, DAI
-    // WETH - 0xd0A1E359811322d97991E03f863a0C30C2cF029C
-    // PETH - 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64
-    // MKR - 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD
-    // DAI - 0xC4375B7De8af5a38a93548eb8453a498222C4fF2
+    // WETH - 0xd0a1e359811322d97991e03f863a0c30c2cf029c
+    // PETH - 0xf4d791139ce033ad35db2b2201435fad668b1b64
+    // MKR - 0xaaf64bfcc32d0f15873a02163e7e500671a4ffcd
+    // DAI - 0xc4375b7de8af5a38a93548eb8453a498222c4ff2
     function ApproveERC20(address tokenAddress) public {
         token tokenFunctions = token(tokenAddress);
         tokenFunctions.approve(CDPAddr, 2**256 - 1);
