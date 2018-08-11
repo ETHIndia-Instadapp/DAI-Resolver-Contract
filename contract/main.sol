@@ -31,19 +31,27 @@ interface MakerCDP {
     function bite(bytes32 cup) external;
 }
 
+interface WETHFace {
+    function deposit() external payable;
+}
+
 contract CentralCDP {
 
     address public admin;
     address public CDPAddr = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
     MakerCDP DAILoanMaster = MakerCDP(CDPAddr);
 
+    // for calculating the loan percentage to users
+    uint public GlobalLocked; // Total ETH Locked
+    uint public GlobalWithdraw; // Total DAI Withdrawn
+
     struct Loan {
         uint Collateral; // locked ETH
         uint Withdrawn; // withdrawn DAI
+        uint EtherPrice; // average ether price at which the loan is issued
     }
 
     mapping (address => Loan) public Loans; // borrower >>> loan
-    uint public TotalLocked; // ETH
 
     constructor() public {
         admin = msg.sender;
@@ -63,25 +71,38 @@ contract CentralCDP {
         DAILoanMaster.open();
     }
 
-    // send ether to contract address to lock ether
+    // Send Ether to contract address to lock ether
     function() public payable {
-        // 0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(msg.value); // ETH to WETH
-        // DAILoanMaster.join(msg.value); // WETH to PETH
-        // DAILoanMaster.lock(CDPByteCode, msg.value); // Lock PETH in CDP Contract
+        ETH_WETH(msg.value);
+        WETH_PETH(msg.value);
+        PETH_CDP(msg.value);
+        GlobalLocked += msg.value;
         Loan storage l = Loans[msg.sender];
         l.Collateral += msg.value;
     }
 
+    // ETH to WETH
     function ETH_WETH(uint weiAmt) public onlyAdmin {
-        0xd0A1E359811322d97991E03f863a0C30C2cF029C.transfer(weiAmt); // ETH to WETH
+        WETHFace wethFunction = WETHFace(0xd0A1E359811322d97991E03f863a0C30C2cF029C);
+        wethFunction.deposit.value(weiAmt)();
     }
 
+    // WETH to PETH
+    // WETH to PETH conversion will not be always same = give more WETH and get less PETH
     function WETH_PETH(uint weiAmt) public onlyAdmin {
-        DAILoanMaster.join(weiAmt); // WETH to PETH
+        // factor the conversion rate between PETH & WETH
+        DAILoanMaster.join(weiAmt);
     }
 
+    // Lock PETH in CDP Contract
     function PETH_CDP(uint weiAmt) public onlyAdmin {
-        DAILoanMaster.lock(CDPByteCode, weiAmt); // Lock PETH in CDP Contract
+        DAILoanMaster.lock(CDPByteCode, weiAmt);
+    }
+
+    // Withdraw DAI from CDP
+    function CDP_DAI(uint daiAmt) public onlyAdmin {
+        // factor the global balance of ETH & DAI before executing
+        DAILoanMaster.draw(CDPByteCode, daiAmt);
     }
 
     // allowing WETH, PETH, MKR, DAI
@@ -94,7 +115,15 @@ contract CentralCDP {
         tokenFunctions.approve(CDPAddr, 2**256 - 1);
     }
 
+    function DepositEther() public payable {}
+
 }
+
+// for Sean
+// How to get the PETH / WETH ratio?
+
+//// to do later
+// add events
 
 //// Improvements
 // instead of open CDP create CDP from individual address and give CDP
