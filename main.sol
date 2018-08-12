@@ -16,11 +16,13 @@ pragma solidity ^0.4.24;
 interface token {
     function transfer(address receiver, uint amount) external returns(bool);
     function approve(address spender, uint256 value) external returns (bool);
+    function transferFrom(address _from, address _to, uint256 _value) external returns(bool);
 }
 
 interface MakerCDP {
     function open() external returns (bytes32 cup);
     function join(uint wad) external; // Join PETH
+    function exit(uint wad) external; // Exit PETH
     function give(bytes32 cup, address guy) external;
     function lock(bytes32 cup, uint wad) external;
     function free(bytes32 cup, uint wad) external;
@@ -36,9 +38,10 @@ interface PriceInterface {
 
 interface WETHFace {
     function deposit() external payable;
+    function withdraw(uint wad) external;
 }
 
-contract InternalCDP {
+contract DeclaredVar {
 
     address public WETH = 0xd0a1e359811322d97991e03f863a0c30c2cf029c;
     address public PETH = 0xf4d791139ce033ad35db2b2201435fad668b1b64;
@@ -47,7 +50,6 @@ contract InternalCDP {
 
     address public onChainPrice = 0xA944bd4b25C9F186A846fd5668941AA3d3B8425F;
 
-    address public Admin;
     address public CDPAddr = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
     MakerCDP DAILoanMaster = MakerCDP(CDPAddr);
 
@@ -62,19 +64,12 @@ contract InternalCDP {
     }
 
     mapping (address => Loan) public Loans; // borrower >>> loan
-
-    constructor() public {
-        Admin = msg.sender;
-        ApproveERC20();
-        openCDP();
-    }
-
-    modifier onlyAdmin() {
-        require(msg.sender == Admin, "Permission Denied");
-        _;
-    }
-
     bytes32 public CDPByteCode;
+
+}
+
+contract IssueLoan is DeclaredVar {
+
     function openCDP() internal {
         CDPByteCode = DAILoanMaster.open();
     }
@@ -120,7 +115,7 @@ contract InternalCDP {
 
 }
 
-contract CentralCDP is InternalCDP {
+contract CentralCDP is IssueLoan {
 
     // Send Ether to contract address to lock ether
     function InitiateLoan(uint daiAmt) public payable {
@@ -166,6 +161,40 @@ contract CentralCDP is InternalCDP {
         l.Withdrawn += daiAmt;
     }
 
+    function getETHtoFree(uint daitoWipe) public view returns (uint ETHtoFree) {
+        Loan memory l = Loans[msg.sender];
+        require(daitoWipe <= l.Withdrawn, "You're paying more than what you've taken.");
+        ETHtoFree = (daitoWipe * l.Collateral) / l.Withdrawn;
+    }
+
+    // provide allowance before you access the DAI
+    function RepayBack(uint daitoWipe, bool wethbool) public {
+        uint unlocketh = getETHtoFree(daitoWipe);
+        token tokenFunction = token(DAI);
+        tokenFunction.transferFrom(msg.sender, address(this), daitoWipe);
+        DAILoanMaster.wipe(CDPByteCode, daitoWipe);
+        DAILoanMaster.free(CDPByteCode, unlocketh);
+        DAILoanMaster.exit(unlocketh);
+
+        if (wethbool) {
+            token tokenFunctions = token(WETH);
+            tokenFunctions.transfer(msg.sender, unlocketh);
+        }
+
+        Loan storage l = Loans[msg.sender];
+        GlobalLocked -= unlocketh;
+        l.Collateral -= unlocketh;
+        GlobalWithdraw -= daitoWipe;
+        l.Withdrawn -= daitoWipe;
+    }
+
+}
+
+contract CDPResolver is CentralCDP {
+    constructor() public {
+        ApproveERC20();
+        openCDP();
+    }
 }
 
 //// to do later
