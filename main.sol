@@ -13,12 +13,15 @@ pragma solidity ^0.4.24;
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// @authors Soumay Jain, Samyak Jain & Satish Nampally
+
 interface token {
     function transfer(address receiver, uint amount) external returns(bool);
     function approve(address spender, uint256 value) external returns (bool);
     function transferFrom(address _from, address _to, uint256 _value) external returns(bool);
 }
 
+// Interface for functions of MakerDAO CDP
 interface MakerCDP {
     function open() external returns (bytes32 cup);
     function join(uint wad) external; // Join PETH
@@ -32,6 +35,7 @@ interface MakerCDP {
     function bite(bytes32 cup) external;
 }
 
+// Interface retrives the ETH prices from MakerDAO price feeds
 interface PriceInterface {
     function peek() public view returns (bytes32, bool);
 }
@@ -41,6 +45,10 @@ interface WETHFace {
     function withdraw(uint wad) external;
 }
 
+// Contract to manage the global cdp stats and 
+// user individual exposure, contract also initalises the 
+// MakerDAO contracts to that will be used to setup
+// CDP and manage.
 contract DeclaredVar {
 
     address public WETH = 0xd0a1e359811322d97991e03f863a0c30c2cf029c;
@@ -68,6 +76,9 @@ contract DeclaredVar {
 
 }
 
+// Contract that overrides the MakerDAO functions
+// that acts like bridge and agreegate the transaction 
+// to open and manage CDP
 contract IssueLoan is DeclaredVar {
 
     function openCDP() internal {
@@ -115,9 +126,15 @@ contract IssueLoan is DeclaredVar {
 
 }
 
+// Contract uses the IssueLoan contract and this is actual functions 
+// that are going to be consumed by Dapps to simplify the Loan CDP
+// all the 12 transaction are managed and aggregrated into one single function
 contract CentralCDP is IssueLoan {
 
     // Send Ether to contract address to lock ether
+    // Convert ETH -> WETH, WETH -> PETH and PETH -> CDP
+    // once the CDP is approved, calling intiateWithdraw to draw
+    // dai from CDP and transfer to user wallet
     function InitiateLoan(uint daiAmt) public payable {
         // interchanging required tokens
         if (msg.value != 0) {
@@ -137,6 +154,8 @@ contract CentralCDP is IssueLoan {
     }
 
     // Withdraw DAI from CDP
+    // implmentation from drawing Dai from CDP and transfer to 
+    // user wallet
     function InitiateWithdraw(uint daiAmt) internal {
         Loan storage l = Loans[msg.sender];
 
@@ -161,13 +180,15 @@ contract CentralCDP is IssueLoan {
         l.Withdrawn += daiAmt;
     }
 
+    // function to Free the ETH by repaying Dai
     function getETHtoFree(uint daitoWipe) public view returns (uint ETHtoFree) {
         Loan memory l = Loans[msg.sender];
         require(daitoWipe <= l.Withdrawn, "You're paying more than what you've taken.");
         ETHtoFree = (daitoWipe * l.Collateral) / l.Withdrawn;
     }
 
-    // provide allowance before you access the DAI
+    // Provide allowance before you access the DAI
+    // reapying the loan / Dai to CDP to free the locked ETH
     function RepayBack(uint daitoWipe, bool wethbool) public {
         uint unlocketh = getETHtoFree(daitoWipe);
         token tokenFunction = token(DAI);
@@ -190,18 +211,12 @@ contract CentralCDP is IssueLoan {
 
 }
 
+// Giving CDP approval to WETH, PETH, MKR, DAI and opening the CDP
+// ownersdhip of this CDP will be this contract and all user will
+// interact with our Dapp
 contract CDPResolver is CentralCDP {
     constructor() public {
         ApproveERC20();
         openCDP();
     }
 }
-
-//// to do later
-// add events (contract)
-// keep 1 WETH already locked in your contract to overcome that WETH to PETH problem
-
-//// Improvements
-// instead of open CDP create CDP from individual address and give CDP
-// add a give CDP option to transfer the CDP to another address
-// tub.per in tub contract
