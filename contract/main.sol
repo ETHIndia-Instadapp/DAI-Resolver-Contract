@@ -102,7 +102,7 @@ contract InternalCDP {
         PriceInterface ethPrice = PriceInterface(onChainPrice); // https://conteract.io/c/6Cd6544A04
         bytes32 priceByte;
         (priceByte, ) = ethPrice.peek();
-        uint priceNum = uint(priceByte);
+        uint priceNum = uint(priceByte) / 10**18;
         return priceNum;
     }
 
@@ -125,39 +125,45 @@ contract CentralCDP is InternalCDP {
     // Send Ether to contract address to lock ether
     function InitiateLoan(uint daiAmt) public payable {
         // interchanging required tokens
-        ETH_WETH(msg.value);
-        WETH_PETH(msg.value);
-        PETH_CDP(msg.value);
+        if (msg.value != 0) {
+            ETH_WETH(msg.value);
+            WETH_PETH(msg.value);
+            PETH_CDP(msg.value);
+        }
 
-        // storing local variables
-        GlobalLocked += msg.value;
         Loan storage l = Loans[msg.sender];
+        GlobalLocked += msg.value;
         l.Collateral += msg.value;
 
-        InitiateWithdraw(daiAmt);
+        if (daiAmt != 0) {
+            InitiateWithdraw(daiAmt);
+        }
+
     }
 
     // Withdraw DAI from CDP
-    function InitiateWithdraw(uint daiAmt) public {
-
+    function InitiateWithdraw(uint daiAmt) internal {
         Loan storage l = Loans[msg.sender];
+
+        // DAI check
         uint lockedETH = l.Collateral;
         uint getPrice = getETHprice();
-        uint halflockedETHinUSD = lockedETH * getPrice / 2;
-        uint availableDAI = l.Withdrawn + daiAmt;
-        require(availableDAI < halflockedETHinUSD, "You can't withdraw more than 50% dollar price of ether.");
+        uint availableDAI = (lockedETH * getPrice / 2) - l.Withdrawn;
+        require(availableDAI > daiAmt, "You can't withdraw more than 50% dollar price of ether.");
 
         // draw DAI
         DAILoanMaster.draw(CDPByteCode, daiAmt);
+
         // transfer DAI
         token tokenFunctions = token(DAI);
         tokenFunctions.transfer(msg.sender, daiAmt);
 
-        // saving in contract state
-        // CHECK if already taken loan before or not
+        // set new ether price of borrower
+        l.EtherPrice = (l.EtherPrice*l.Withdrawn + getPrice*daiAmt) / (l.Withdrawn + daiAmt);
+
+        // storing local variables
         GlobalWithdraw += daiAmt;
         l.Withdrawn += daiAmt;
-        l.EtherPrice = getPrice;
     }
 
 }
