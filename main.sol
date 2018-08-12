@@ -13,7 +13,7 @@ pragma solidity ^0.4.24;
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// @authors Soumay Jain, Samyak Jain & Satish Nampally
+// @authors Sowmay Jain, Samyak Jain & Satish Nampally
 
 interface token {
     function transfer(address receiver, uint amount) external returns(bool);
